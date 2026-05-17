@@ -25,7 +25,7 @@ from rich import box
 
 from config import TOP_100_STOCKS, SCAN_INTERVAL_SECONDS, STARTING_CAPITAL
 from scanner.data_fetcher import batch_fetch, get_current_price
-from scanner.signals import analyze_ticker
+from scanner.signals import analyze_ticker, macro_to_signal
 from scanner.macro_scanner import fetch_macro_data, analyze_macro, MACRO_TICKERS
 from scanner.ml_pattern import predict, train_model
 from scanner.sentiment import aggregate_sentiment
@@ -346,9 +346,17 @@ def _run_scan() -> None:
 
             signals.append(sig)
 
+        # Convert passing macro assets (SPY/BTC/XRP) into signals and pin to top
+        macro_signals = []
+        for name in ("SPY", "BTC", "XRP"):
+            if name in new_macro and name in new_ml:
+                ms = macro_to_signal(new_macro[name], new_ml[name])
+                if ms is not None:
+                    macro_signals.append(ms)
+
         order = {"FADE": 0, "LONG": 1, "PASS": 2}
         signals.sort(key=lambda s: (order.get(s.signal_type, 9), -s.confidence))
-        _active_signals = signals
+        _active_signals = macro_signals + signals  # macro pinned above equities
         _macro_results = new_macro
         _ml_results = new_ml
         _spy_regime = spy_regime

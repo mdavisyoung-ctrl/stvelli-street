@@ -16,7 +16,7 @@ from rich import box
 
 from config import TOP_100_STOCKS
 from scanner.data_fetcher import batch_fetch
-from scanner.signals import analyze_ticker
+from scanner.signals import analyze_ticker, macro_to_signal
 from scanner.macro_scanner import fetch_macro_data, analyze_macro
 from scanner.ml_pattern import predict, train_model
 from scanner.sentiment import aggregate_sentiment
@@ -128,6 +128,15 @@ def run(quick: bool = False):
 
     order = {"FADE": 0, "LONG": 1, "PASS": 2}
     signals.sort(key=lambda s: (order.get(s.signal_type, 9), -s.confidence))
+
+    # Pin SPY/BTC/XRP that pass to the top
+    macro_signals = []
+    for name in ("SPY", "BTC", "XRP"):
+        if name in macro_results and name in ml_results:
+            ms = macro_to_signal(macro_results[name], ml_results[name])
+            if ms is not None:
+                macro_signals.append(ms)
+    signals = macro_signals + signals
 
     # ── Signals table ──
     actionable = [s for s in signals if s.signal_type != "PASS"]

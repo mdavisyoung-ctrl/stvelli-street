@@ -1,5 +1,5 @@
 import pytest
-from scanner.signals import Signal
+from scanner.signals import Signal, macro_to_signal
 from strategies.fade_strategy import evaluate_fade, FadeSetup
 from strategies.momentum_strategy import evaluate_momentum, MomentumSetup
 
@@ -67,3 +67,67 @@ class TestMomentumStrategy:
     def test_returns_none_for_low_confidence(self):
         sig = _make_signal("LONG", confidence=0.3)
         assert evaluate_momentum(sig) is None
+
+
+def _make_macro(regime, ticker="SPY", price=500.0, rsi=55.0):
+    return {
+        "ticker": ticker,
+        "regime": regime,
+        "price": price,
+        "rsi": rsi,
+        "rsi_label": "NEUTRAL",
+        "atr": 5.0,
+        "support": 490.0,
+        "resistance": 510.0,
+        "sentiment_score": 0.3,
+        "sentiment_label": "BULLISH",
+        "top_headline": "Markets rally",
+        "cp_ratio": 1.1,
+        "cp_class": "NEUTRAL",
+        "momentum": {"target_price": 520.0, "bars_estimate": 3, "direction": "UP"},
+    }
+
+
+def _make_ml(label, confidence=0.70, prediction=1):
+    return {"label": label, "confidence": confidence, "prediction": prediction}
+
+
+class TestMacroToSignal:
+    def test_long_signal_when_risk_on_and_ml_up(self):
+        sig = macro_to_signal(_make_macro("RISK_ON"), _make_ml("UP"))
+        assert sig is not None
+        assert sig.signal_type == "LONG"
+        assert sig.ticker == "SPY"
+
+    def test_fade_signal_when_risk_off_and_ml_down(self):
+        sig = macro_to_signal(_make_macro("RISK_OFF"), _make_ml("DOWN", prediction=-1))
+        assert sig is not None
+        assert sig.signal_type == "FADE"
+
+    def test_returns_none_when_low_ml_confidence(self):
+        sig = macro_to_signal(_make_macro("RISK_ON"), _make_ml("UP", confidence=0.4))
+        assert sig is None
+
+    def test_returns_none_when_regime_conflicts_ml(self):
+        # ML says UP but regime is RISK_OFF → no signal
+        sig = macro_to_signal(_make_macro("RISK_OFF"), _make_ml("UP"))
+        assert sig is None
+
+    def test_returns_none_when_ml_flat(self):
+        sig = macro_to_signal(_make_macro("RISK_ON"), _make_ml("FLAT", confidence=0.8))
+        assert sig is None
+
+    def test_btc_xrp_generate_signals(self):
+        for ticker in ("BTC", "XRP"):
+            macro = _make_macro("BULLISH", ticker=ticker, price=2.5 if ticker == "XRP" else 95000)
+            sig = macro_to_signal(macro, _make_ml("UP"))
+            assert sig is not None
+            assert sig.ticker == ticker
+
+    def test_signal_has_valid_price(self):
+        sig = macro_to_signal(_make_macro("RISK_ON"), _make_ml("UP"))
+        assert sig.price == 500.0
+
+    def test_source_tagged_in_extra(self):
+        sig = macro_to_signal(_make_macro("RISK_ON"), _make_ml("UP"))
+        assert sig.extra.get("source") == "macro"

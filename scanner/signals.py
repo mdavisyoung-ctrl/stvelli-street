@@ -162,3 +162,61 @@ def _fmt(val) -> str:
     if val is None:
         return "N/A"
     return f"{val:.2f}"
+
+
+def macro_to_signal(macro_result: dict, ml_result: dict) -> Signal | None:
+    """
+    Converts a macro_scanner result + ml_pattern result into a Signal so
+    SPY, BTC, and XRP appear in the main signals table when they pass.
+    Returns None if neither LONG nor FADE threshold is met.
+    """
+    regime = macro_result.get("regime", "NEUTRAL")
+    ml_label = ml_result.get("label", "FLAT")
+    ml_conf = ml_result.get("confidence", 0.0)
+    ticker = macro_result.get("ticker", "?")
+    price = macro_result.get("price")
+    rsi = macro_result.get("rsi")
+    atr = macro_result.get("atr")
+    sent_score = macro_result.get("sentiment_score", 0.0)
+    sent_label = macro_result.get("sentiment_label", "NEUTRAL")
+    headline = macro_result.get("top_headline", "")
+    r_label = macro_result.get("rsi_label", "NEUTRAL")
+    momentum = macro_result.get("momentum", {})
+
+    LONG_REGIMES = {"RISK_ON", "BULLISH", "OVERSOLD"}
+    FADE_REGIMES = {"RISK_OFF", "OVERBOUGHT"}
+
+    # Require ML confidence + regime alignment
+    if ml_conf >= 0.55 and ml_label == "UP" and regime in LONG_REGIMES:
+        sig_type = "LONG"
+        confidence = round((ml_conf + 0.6) / 2, 2)  # blend ML conf with regime score
+        reason = f"Regime={regime}, ML={ml_label}({ml_conf:.0%}), Sentiment={sent_label}({sent_score:+.2f})"
+    elif ml_conf >= 0.55 and ml_label == "DOWN" and regime in FADE_REGIMES:
+        sig_type = "FADE"
+        confidence = round((ml_conf + 0.6) / 2, 2)
+        reason = f"Regime={regime}, ML={ml_label}({ml_conf:.0%}), Sentiment={sent_label}({sent_score:+.2f})"
+    else:
+        return None  # doesn't pass — stays out of signals table
+
+    return Signal(
+        ticker=ticker,
+        signal_type=sig_type,
+        confidence=confidence,
+        price=round(price, 4) if price else None,
+        cp_ratio=macro_result.get("cp_ratio"),
+        cp_zscore=None,
+        cp_class=macro_result.get("cp_class", "NEUTRAL"),
+        sentiment_score=sent_score,
+        sentiment_label=sent_label,
+        rsi=rsi,
+        rsi_label=r_label,
+        atr=atr,
+        support=macro_result.get("support"),
+        resistance=macro_result.get("resistance"),
+        target_price=momentum.get("target_price"),
+        bars_estimate=momentum.get("bars_estimate", 0),
+        direction=momentum.get("direction", "UNKNOWN"),
+        top_headline=headline,
+        reason=reason,
+        extra={"source": "macro", "ml_confidence": ml_conf},
+    )
