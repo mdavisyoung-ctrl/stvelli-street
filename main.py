@@ -45,6 +45,7 @@ from portfolio.risk_manager import (
 from scanner.outcome_tracker import record_signal, resolve_pending, get_labeled
 from scanner.ml_pattern import retrain_on_outcomes
 from portfolio.adaptive_thresholds import update_thresholds
+from notifier import alert_signal, alert_stop_hit, alert_target_hit
 
 logging.basicConfig(
     filename="scanner.log",
@@ -360,12 +361,31 @@ def _run_scan() -> None:
 
         order = {"FADE": 0, "LONG": 1, "PASS": 2}
         signals.sort(key=lambda s: (order.get(s.signal_type, 9), -s.confidence))
-        _active_signals = macro_signals + signals  # macro pinned above equities
+        all_signals = macro_signals + signals  # macro pinned above equities
+        _active_signals = all_signals
         _macro_results = new_macro
         _ml_results = new_ml
         _spy_regime = spy_regime
         _last_scan = datetime.now().strftime("%H:%M:%S")
         _scan_count += 1
+
+        # ── Notify top actionable signal via Telegram ──
+        top = next((s for s in all_signals if s.signal_type != "PASS"), None)
+        if top:
+            from strategies.fade_strategy import evaluate_fade
+            from strategies.momentum_strategy import evaluate_momentum
+            setup = evaluate_fade(top) or evaluate_momentum(top)
+            if setup:
+                alert_signal(
+                    ticker=top.ticker,
+                    signal_type=top.signal_type,
+                    price=top.price or 0,
+                    stop=setup.stop_loss,
+                    target=setup.take_profit,
+                    confidence=top.confidence,
+                    reason=top.reason,
+                    headline=top.top_headline,
+                )
 
         # ── Self-learning feedback loop ──
         # 1. Record new LONG/FADE signals to pending
@@ -440,9 +460,13 @@ def _check_real_exits(data: dict) -> None:
             target = take_profit_price(pos["entry_price"], None, sig_type)
             if should_stop(pos["entry_price"], cur, stop, sig_type):
                 console.print(f"\n[bold red]⚠ STOP HIT: {ticker} @ ${cur:.2f} → CLOSE IN ROBINHOOD NOW[/bold red]")
+                pnl = (cur - pos["entry_price"]) * pos["shares"] * (-1 if sig_type == "FADE" else 1)
+                alert_stop_hit(ticker, cur, pnl)
                 _portfolio = close_position(_portfolio, ticker, cur)
             elif should_take_profit(pos["entry_price"], cur, target, sig_type):
                 console.print(f"\n[bold green]✓ TARGET HIT: {ticker} @ ${cur:.2f} → Consider closing[/bold green]")
+                pnl = (cur - pos["entry_price"]) * pos["shares"] * (-1 if sig_type == "FADE" else 1)
+                alert_target_hit(ticker, cur, pnl)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
