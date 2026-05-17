@@ -4,4 +4,6 @@ __pycache__/
 *.pyo
 .pytest_cache/
 portfolio_state.json
+paper_state.json
+models/*.joblib
 *.log
