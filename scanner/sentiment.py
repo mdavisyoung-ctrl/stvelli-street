@@ -193,7 +193,9 @@ def _score_with_finbert(title: str, content: str) -> float:
         if not text:
             return 0.0
         results = _finbert_pipeline(text, truncation=True, max_length=512)
-        # results is a list of dicts with 'label' and 'score'
+        # top_k=None returns [[{...}, ...]] — unwrap outer list if nested
+        if results and isinstance(results[0], list):
+            results = results[0]
         label_map = {r["label"].lower(): r["score"] for r in results}
         pos = label_map.get("positive", 0.0)
         neg = label_map.get("negative", 0.0)
