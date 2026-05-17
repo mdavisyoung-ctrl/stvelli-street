@@ -7,3 +7,5 @@ portfolio_state.json
 paper_state.json
 models/*.joblib
 *.log
+outcomes.json
+thresholds.json

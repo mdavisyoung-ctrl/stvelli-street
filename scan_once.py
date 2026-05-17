@@ -24,6 +24,8 @@ from strategies.fade_strategy import evaluate_fade
 from strategies.momentum_strategy import evaluate_momentum
 from portfolio.tracker import load_state, portfolio_value, win_rate
 from portfolio.paper_trader import load_paper_state, paper_portfolio_value, model_accuracy_report
+from portfolio.adaptive_thresholds import get_current_thresholds, load_thresholds
+from scanner.outcome_tracker import load_outcomes, win_rate_by_type
 from config import STARTING_CAPITAL
 
 console = Console()
@@ -193,6 +195,31 @@ def run(quick: bool = False):
             title="[bold yellow]Best Trade Right Now[/bold yellow]",
             border_style="yellow",
         ))
+
+    # ── Learning Status ──
+    try:
+        outcomes_data = load_outcomes()
+        pending_count = len(outcomes_data.get("pending", []))
+        labeled_count = len(outcomes_data.get("labeled", []))
+        wr = win_rate_by_type()
+        thresholds = get_current_thresholds()
+        long_wr_pct = f"{wr['LONG'] * 100:.1f}%" if wr["LONG"] else "—"
+        fade_wr_pct = f"{wr['FADE'] * 100:.1f}%" if wr["FADE"] else "—"
+        model_improved = "No"  # scan_once does not retrain; retraining happens in main.py loop
+        learning_lines = [
+            f"  Pending outcomes:   {pending_count}",
+            f"  Labeled outcomes:   {labeled_count} total",
+            f"  Win rate:           LONG {long_wr_pct}  |  FADE {fade_wr_pct}",
+            f"  Current thresholds: FADE={thresholds['fade']:.2f}  |  LONG={thresholds['long']:.2f}",
+            f"  Model improving:    {model_improved}",
+        ]
+        console.print(Panel(
+            "\n".join(learning_lines),
+            title="[bold blue]Learning Status[/bold blue]",
+            border_style="blue",
+        ))
+    except Exception:
+        pass  # Non-critical; never crash the scan for this
 
 
 if __name__ == "__main__":
