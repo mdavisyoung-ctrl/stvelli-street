@@ -2,8 +2,11 @@
 One-shot scan: fetches data, runs all signals, prints a report.
 Works in any environment (no live dashboard, no TTY required).
 
-Usage:  python scan_once.py
-        python scan_once.py --quick     # SPY/BTC/XRP only, skips 100-stock scan
+Usage:
+  python scan_once.py                   # full scan, run once
+  python scan_once.py --quick           # SPY/BTC/XRP only, run once
+  python scan_once.py --loop            # full scan, repeat every 5 min
+  python scan_once.py --quick --loop    # quick scan, repeat every 5 min
 """
 import sys
 import argparse
@@ -223,7 +226,24 @@ def run(quick: bool = False):
 
 
 if __name__ == "__main__":
+    import time as _time
     parser = argparse.ArgumentParser()
     parser.add_argument("--quick", action="store_true", help="SPY/BTC/XRP only, skip equity scan")
+    parser.add_argument("--loop", action="store_true", help="Repeat scan every 5 minutes (Ctrl+C to stop)")
     args = parser.parse_args()
-    run(quick=args.quick)
+
+    if not args.loop:
+        run(quick=args.quick)
+    else:
+        from config import SCAN_INTERVAL_SECONDS
+        console.print(f"[bold cyan]Loop mode — scanning every {SCAN_INTERVAL_SECONDS // 60} min. Ctrl+C to stop.[/bold cyan]\n")
+        scan_num = 0
+        while True:
+            scan_num += 1
+            console.rule(f"[dim]Scan #{scan_num}  {__import__('datetime').datetime.now().strftime('%H:%M:%S')}[/dim]")
+            try:
+                run(quick=args.quick)
+            except Exception as e:
+                console.print(f"[red]Scan error: {e}[/red]")
+            console.print(f"\n[dim]Next scan in {SCAN_INTERVAL_SECONDS // 60} min... (Ctrl+C to stop)[/dim]\n")
+            _time.sleep(SCAN_INTERVAL_SECONDS)

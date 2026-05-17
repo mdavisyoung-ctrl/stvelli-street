@@ -535,20 +535,35 @@ def main():
     scanner_thread = threading.Thread(target=_scanner_loop, args=(stop_event,), daemon=True)
     scanner_thread.start()
 
+    # Cross-platform input: read stdin on a dedicated thread so the
+    # dashboard loop never blocks (select.select doesn't work on Windows)
+    _input_queue: "queue.Queue[str]" = __import__("queue").Queue()
+
+    def _read_input():
+        while not stop_event.is_set():
+            try:
+                line = input()
+                _input_queue.put(line)
+            except EOFError:
+                break
+
+    input_thread = threading.Thread(target=_read_input, daemon=True)
+    input_thread.start()
+
     time.sleep(3)
 
     try:
         with Live(console=console, refresh_per_second=0.3, screen=True) as live:
             while True:
                 live.update(render_dashboard())
-                import select
-                ready, _, _ = select.select([sys.stdin], [], [], 1.0)
-                if ready:
-                    line = sys.stdin.readline().strip()
+                try:
+                    line = _input_queue.get_nowait()
                     live.stop()
                     if not handle_command(line):
                         break
                     live.start()
+                except __import__("queue").Empty:
+                    time.sleep(1.0)
     except KeyboardInterrupt:
         pass
     finally:
