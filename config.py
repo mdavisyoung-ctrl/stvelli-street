@@ -1,9 +1,13 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+try:
+    load_dotenv()
+except Exception:
+    pass  # .env missing or malformed — fall back to env vars or default below
 
-EODHD_API_KEY = os.getenv("EODHD_API_KEY", "")
+_FALLBACK_KEY = "69af52dd739130.88973111"
+EODHD_API_KEY = os.getenv("EODHD_API_KEY") or _FALLBACK_KEY
 
 SCAN_INTERVAL_SECONDS = 300  # 5 minutes
 
