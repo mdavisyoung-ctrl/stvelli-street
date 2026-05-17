@@ -72,7 +72,7 @@ def get_options_chain(ticker: str) -> dict:
         return {}
 
 
-def get_news(ticker: str, limit: int = 20) -> list[dict]:
+def get_news(ticker: str, limit: int = 50) -> list[dict]:
     """
     Fetches recent news from EODHD for `ticker`.
     Returns list of {"title": str, "date": str, "content": str}.
@@ -93,6 +93,7 @@ def get_news(ticker: str, limit: int = 20) -> list[dict]:
                 "title": a.get("title", ""),
                 "date": a.get("date", ""),
                 "content": a.get("content", ""),
+                "link": a.get("link", ""),
             }
             for a in articles
         ]

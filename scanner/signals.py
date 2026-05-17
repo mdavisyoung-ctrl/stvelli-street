@@ -110,6 +110,20 @@ def analyze_ticker(ticker: str, data: dict, cp_history: list) -> Signal:
     ]
     long_conf = _confidence(long_factors)
 
+    # --- Sentiment quality adjustments ---
+    # Discount PR-heavy news: reduce confidence in both directions
+    if sent.get("pr_dominated", False):
+        fade_conf = max(0.0, fade_conf - 0.10)
+        long_conf = max(0.0, long_conf - 0.10)
+
+    # Volume spike boost: boost whichever direction aligns with sentiment
+    volume_spike = sent.get("volume_spike", {})
+    if volume_spike.get("is_spike", False):
+        if sent["score"] >= SENTIMENT_BULLISH_THRESHOLD:
+            long_conf = min(1.0, long_conf + 0.10)
+        elif sent["score"] <= SENTIMENT_BEARISH_THRESHOLD:
+            fade_conf = min(1.0, fade_conf + 0.10)
+
     if fade_conf >= 0.60:
         sig_type = "FADE"
         confidence = fade_conf
@@ -151,7 +165,11 @@ def analyze_ticker(ticker: str, data: dict, cp_history: list) -> Signal:
         direction=momentum["direction"],
         top_headline=sent["top_headline"],
         reason=reason,
-        extra={"skew": skew},
+        extra={
+            "skew": skew,
+            "pr_dominated": sent.get("pr_dominated", False),
+            "volume_spike": sent.get("volume_spike", {"is_spike": False, "z_score": 0.0}),
+        },
     )
 
 
