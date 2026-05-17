@@ -42,6 +42,9 @@ from portfolio.paper_trader import (
 from portfolio.risk_manager import (
     stop_loss_price, take_profit_price, should_stop, should_take_profit
 )
+from scanner.outcome_tracker import record_signal, resolve_pending, get_labeled
+from scanner.ml_pattern import retrain_on_outcomes
+from portfolio.adaptive_thresholds import update_thresholds
 
 logging.basicConfig(
     filename="scanner.log",
@@ -62,6 +65,7 @@ _ml_results: dict = {}
 _last_scan: str = "Never"
 _scan_count: int = 0
 _spy_regime: str = "UNKNOWN"
+_thresholds: dict = {"fade": 0.60, "long": 0.55}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -277,7 +281,7 @@ def _scanner_loop(stop_event: threading.Event) -> None:
 
 def _run_scan() -> None:
     global _active_signals, _last_scan, _scan_count, _macro_results, _ml_results, _spy_regime
-    global _portfolio, _paper
+    global _portfolio, _paper, _thresholds
 
     logging.info("Starting scan #%d", _scan_count + 1)
 
@@ -362,6 +366,61 @@ def _run_scan() -> None:
         _spy_regime = spy_regime
         _last_scan = datetime.now().strftime("%H:%M:%S")
         _scan_count += 1
+
+        # ── Self-learning feedback loop ──
+        # 1. Record new LONG/FADE signals to pending
+        for sig in signals:
+            if sig.signal_type in ("LONG", "FADE"):
+                try:
+                    record_signal(sig)
+                except Exception as e:
+                    logger.warning("record_signal failed for %s: %s", sig.ticker, e)
+
+        # 2. Build current_prices dict from fetched data
+        current_prices = {}
+        for ticker in TOP_100_STOCKS:
+            td = data.get(ticker, {})
+            hist = td.get("history")
+            if hist is not None and not hist.empty:
+                current_prices[ticker] = float(hist["Close"].iloc[-1])
+
+        # 3. Resolve pending outcomes
+        newly_labeled = []
+        try:
+            newly_labeled = resolve_pending(current_prices)
+        except Exception as e:
+            logger.warning("resolve_pending failed: %s", e)
+
+        # 4. If new labels exist, update thresholds and optionally retrain
+        if newly_labeled:
+            try:
+                all_labeled = get_labeled()
+                _thresholds = update_thresholds(all_labeled).__dict__
+                _thresholds = {
+                    "fade": _thresholds.get("fade_threshold", 0.60),
+                    "long": _thresholds.get("long_threshold", 0.55),
+                }
+            except Exception as e:
+                logger.warning("update_thresholds failed: %s", e)
+
+            # Retrain tickers with 20+ labeled outcomes
+            labeled_by_ticker: dict = defaultdict(list)
+            try:
+                all_labeled = get_labeled()
+                for entry in all_labeled:
+                    labeled_by_ticker[entry.get("ticker", "")].append(entry)
+
+                for ticker, ticker_labels in labeled_by_ticker.items():
+                    if len(ticker_labels) >= 20:
+                        td = data.get(ticker, {})
+                        hist = td.get("history")
+                        if hist is not None and not hist.empty:
+                            try:
+                                retrain_on_outcomes(ticker, hist, all_labeled)
+                            except Exception as e:
+                                logger.warning("retrain_on_outcomes failed for %s: %s", ticker, e)
+            except Exception as e:
+                logger.warning("Retrain loop failed: %s", e)
 
     _check_real_exits(data)
     logging.info("Scan complete. Signals: %d", len(signals))

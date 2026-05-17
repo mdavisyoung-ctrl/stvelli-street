@@ -148,6 +148,84 @@ def load_model(ticker: str) -> Pipeline | None:
     return None
 
 
+def retrain_on_outcomes(ticker: str, hist: pd.DataFrame, labeled_outcomes: list[dict]) -> bool:
+    """
+    Retrain the KNN model for *ticker* by appending real-world labeled examples
+    (from outcome_tracker) to the historical training set.
+
+    Returns True if the model was retrained, False if insufficient data.
+    Requires at least 20 labeled outcomes for this ticker.
+    """
+    ticker_outcomes = [o for o in labeled_outcomes if o.get("ticker") == ticker]
+    if len(ticker_outcomes) < 20:
+        logger.debug("Not enough labeled outcomes for %s (%d < 20), skipping retrain",
+                     ticker, len(ticker_outcomes))
+        return False
+
+    # Build feature matrix from historical data (same as train_model)
+    if len(hist) < WINDOW + FORWARD + 20:
+        logger.warning("Not enough history to retrain model for %s", ticker)
+        return False
+
+    X_hist = _build_features(hist, [0.0] * len(hist), [1.0] * len(hist))
+    y_hist = _build_labels(hist)
+    min_len = min(len(X_hist), len(y_hist))
+    X_hist, y_hist = X_hist[:min_len], y_hist[:min_len]
+
+    # Build feature vectors from labeled real-world outcomes
+    outcome_rows = []
+    outcome_labels = []
+    for outcome in ticker_outcomes:
+        features = outcome.get("features", {})
+        if not features:
+            continue
+        cp_ratio = features.get("cp_ratio") or 1.0
+        cp_zscore_val = features.get("cp_zscore") or 0.0
+        sentiment_score = features.get("sentiment_score") or 0.0
+        rsi = features.get("rsi") or 50.0
+        atr_pct = features.get("atr_pct") or 0.0
+        # Map to the 7-feature vector: [rsi_norm, atr_pct, pct_5, pct_10, pct_20, sent, cp]
+        # We only have aggregated features, so use zeros for price-change fields
+        row = [rsi / 100.0, atr_pct, 0.0, 0.0, 0.0, sentiment_score, cp_ratio]
+        outcome_rows.append(row)
+        # Map outcome (1=correct, -1=incorrect, 0=flat) to label
+        raw_outcome = outcome.get("outcome", 0)
+        sig_type = outcome.get("signal_type", "")
+        if raw_outcome == 1:
+            label = 1 if sig_type == "LONG" else -1
+        elif raw_outcome == -1:
+            label = -1 if sig_type == "LONG" else 1
+        else:
+            label = 0
+        outcome_labels.append(label)
+
+    if not outcome_rows:
+        return False
+
+    X_outcomes = np.array(outcome_rows, dtype=float)
+    y_outcomes = np.array(outcome_labels)
+
+    X_combined = np.vstack([X_hist, X_outcomes])
+    y_combined = np.concatenate([y_hist, y_outcomes])
+
+    pipe = Pipeline([
+        ("scaler", StandardScaler()),
+        ("knn", KNeighborsClassifier(
+            n_neighbors=min(N_NEIGHBORS, len(X_combined) - 1),
+            weights="distance",
+        )),
+    ])
+    pipe.fit(X_combined, y_combined)
+
+    model_path = MODEL_DIR / f"{ticker}_knn.joblib"
+    joblib.dump(pipe, model_path)
+    logger.info(
+        "Retrained model for %s with %d historical + %d outcome samples",
+        ticker, len(X_hist), len(outcome_rows),
+    )
+    return True
+
+
 def predict(ticker: str, hist: pd.DataFrame,
             current_sentiment: float = 0.0,
             current_cp: float = 1.0) -> dict:

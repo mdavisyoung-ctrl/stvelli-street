@@ -124,7 +124,9 @@ def analyze_ticker(ticker: str, data: dict, cp_history: list) -> Signal:
         elif sent["score"] <= SENTIMENT_BEARISH_THRESHOLD:
             fade_conf = min(1.0, fade_conf + 0.10)
 
-    if fade_conf >= 0.60:
+    from portfolio.adaptive_thresholds import get_current_thresholds
+    _thresholds = get_current_thresholds()
+    if fade_conf >= _thresholds["fade"]:
         sig_type = "FADE"
         confidence = fade_conf
         reason = (
@@ -132,7 +134,7 @@ def analyze_ticker(ticker: str, data: dict, cp_history: list) -> Signal:
             f"Sentiment={sent['label']} ({sent['score']:+.2f}), "
             f"RSI={_fmt(rsi)} ({r_label})"
         )
-    elif long_conf >= 0.55:
+    elif long_conf >= _thresholds["long"]:
         sig_type = "LONG"
         confidence = long_conf
         reason = (
